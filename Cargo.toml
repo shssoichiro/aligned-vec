@@ -1,12 +1,12 @@
 [package]
-name = "aligned-vec"
-version = "0.6.4"
+name = "aligned-vec2"
+version = "0.6.5"
 edition = "2024"
 rust-version = "1.85"
 authors = ["sarah <>"]
 description = "Aligned vector and box containers"
 readme = "README.md"
-repository = "https://github.com/sarah-ek/aligned-vec/"
+repository = "https://github.com/shssoichiro/aligned-vec"
 license = "MIT"
 keywords = ["vec", "allocation", "box", "slice", "alignment"]
 
