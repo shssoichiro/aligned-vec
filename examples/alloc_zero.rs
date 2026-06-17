@@ -1,5 +1,5 @@
-use diol::prelude::*;
 use diol::Result;
+use diol::prelude::*;
 
 fn alloc_zero(bencher: Bencher, PlotArg(n): PlotArg) {
     bencher.bench(|| aligned_vec::avec_rt![[64] | 0f64; n]);

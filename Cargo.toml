@@ -27,3 +27,6 @@ serde = ["dep:serde"]
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "allow"

@@ -1,8 +1,8 @@
 use crate::{Alignment, TryReserveError};
-use alloc::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, realloc, Layout};
+use alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, handle_alloc_error, realloc};
 use core::marker::PhantomData;
 use core::mem::{align_of, size_of};
-use core::ptr::{null_mut, NonNull};
+use core::ptr::{NonNull, null_mut};
 
 pub struct ARawVec<T, A: Alignment> {
     pub ptr: NonNull<T>,

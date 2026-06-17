@@ -19,9 +19,9 @@
 use core::alloc::Layout;
 use core::fmt::Debug;
 use core::marker::PhantomData;
-use core::mem::{align_of, size_of, ManuallyDrop};
+use core::mem::{ManuallyDrop, align_of, size_of};
 use core::ops::{Deref, DerefMut};
-use core::ptr::{null_mut, NonNull};
+use core::ptr::{NonNull, null_mut};
 use equator::assert;
 use raw::ARawVec;
 
@@ -222,14 +222,14 @@ impl<T: ?Sized, A: Alignment> DerefMut for ABox<T, A> {
 impl<T: ?Sized, A: Alignment> AsRef<T> for ABox<T, A> {
     #[inline]
     fn as_ref(&self) -> &T {
-        &**self
+        self
     }
 }
 
 impl<T: ?Sized, A: Alignment> AsMut<T> for ABox<T, A> {
     #[inline]
     fn as_mut(&mut self) -> &mut T {
-        &mut **self
+        self
     }
 }
 
@@ -285,14 +285,14 @@ impl<T, A: Alignment> DerefMut for AVec<T, A> {
 impl<T, A: Alignment> AsRef<[T]> for AVec<T, A> {
     #[inline]
     fn as_ref(&self) -> &[T] {
-        &**self
+        self
     }
 }
 
 impl<T, A: Alignment> AsMut<[T]> for AVec<T, A> {
     #[inline]
     fn as_mut(&mut self) -> &mut [T] {
-        &mut **self
+        self
     }
 }
 
@@ -750,6 +750,12 @@ impl<T, A: Alignment> AVec<T, A> {
         this
     }
 
+    /// Sets the length of the vector.
+    ///
+    /// # Safety
+    ///
+    /// `new_len` must not exceed the current capacity. The caller must ensure
+    /// that elements up to `new_len` are properly initialized.
     #[inline]
     pub unsafe fn set_len(&mut self, new_len: usize) {
         self.len = new_len;
@@ -792,7 +798,7 @@ impl<T, A: Alignment> AVec<T, A> {
                 len: count,
             }
         } else {
-            Self::from_iter(align, core::iter::repeat(elem).take(count))
+            Self::from_iter(align, core::iter::repeat_n(elem, count))
         }
     }
 
@@ -880,7 +886,7 @@ impl<T: Debug, A: Alignment> Debug for AVec<T, A> {
 
 impl<T: Debug + ?Sized, A: Alignment> Debug for ABox<T, A> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        (&**self).fmt(f)
+        (**self).fmt(f)
     }
 }
 
@@ -921,18 +927,18 @@ impl<T: Ord, A: Alignment> Ord for AVec<T, A> {
 
 impl<T: PartialEq + ?Sized, A: Alignment> PartialEq for ABox<T, A> {
     fn eq(&self, other: &Self) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 impl<T: Eq + ?Sized, A: Alignment> Eq for ABox<T, A> {}
 impl<T: PartialOrd + ?Sized, A: Alignment> PartialOrd for ABox<T, A> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 impl<T: Ord + ?Sized, A: Alignment> Ord for ABox<T, A> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 unsafe impl<T: Sync, A: Alignment + Sync> Sync for AVec<T, A> {}
@@ -952,7 +958,7 @@ mod serde {
         where
             S: ::serde::Serializer,
         {
-            (&**self).serialize(serializer)
+            (**self).serialize(serializer)
         }
     }
 
@@ -963,7 +969,7 @@ mod serde {
         where
             S: ::serde::Serializer,
         {
-            (&**self).serialize(serializer)
+            (**self).serialize(serializer)
         }
     }
 
@@ -1134,7 +1140,6 @@ macro_rules! avec_rt {
 mod tests {
     use super::*;
     use alloc::vec;
-    use core::iter::repeat;
     use equator::assert;
 
     #[test]
@@ -1164,7 +1169,7 @@ mod tests {
     fn collect() {
         let v = AVec::<_>::from_iter(64, 0..4);
         assert_eq!(&*v, &[0, 1, 2, 3]);
-        let v = AVec::<_>::from_iter(64, repeat(()).take(4));
+        let v = AVec::<_>::from_iter(64, std::iter::repeat_n((), 4));
         assert_eq!(&*v, &[(), (), (), ()]);
     }
 
@@ -1184,7 +1189,7 @@ mod tests {
         v.push(7);
         assert_eq!(&*v, &[0, 1, 2, 3, 4, 5, 6, 7]);
 
-        let mut v = AVec::<_>::from_iter(64, repeat(()).take(4));
+        let mut v = AVec::<_>::from_iter(64, std::iter::repeat_n((), 4));
         v.push(());
         v.push(());
         v.push(());
@@ -1209,7 +1214,7 @@ mod tests {
         v.insert(2, 0);
         assert_eq!(&*v, &[-1, 0, 0, 0, 1, 2, 3, 4, 5]);
 
-        let mut v = AVec::<_>::from_iter(64, repeat(()).take(4));
+        let mut v = AVec::<_>::from_iter(64, std::iter::repeat_n((), 4));
         v.insert(3, ());
         v.insert(0, ());
         v.insert(2, ());
@@ -1293,10 +1298,10 @@ mod tests {
         v.push(());
         v.push(());
         v.push(());
-        assert_eq!(v.remove(0), ());
-        assert_eq!(v.remove(0), ());
-        assert_eq!(v.remove(0), ());
-        assert_eq!(v.remove(0), ());
+        v.remove(0);
+        v.remove(0);
+        v.remove(0);
+        v.remove(0);
         assert_eq!(&*v, &[]);
         assert!(v.is_empty());
     }
