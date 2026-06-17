@@ -606,20 +606,20 @@ impl<T, A: Alignment> AVec<T, A> {
 		}
 
 		let len = self.len();
+		if index > len {
+			assert_failed(index, len);
+		}
 
 		// Add space for the new element
 		self.reserve(1);
 
+		// SAFETY: `index <= len` and `reserve(1)` ensures space for the new element.
 		unsafe {
 			let p = self.as_mut_ptr().add(index);
 			if index < len {
 				// Shift everything over to make space. (Duplicating the
 				// `index`th element into two consecutive places.)
 				core::ptr::copy(p, p.add(1), len - index);
-			} else if index == len {
-				// No elements need shifting.
-			} else {
-				assert_failed(index, len);
 			}
 			core::ptr::write(p, element);
 
@@ -764,11 +764,21 @@ impl<T, A: Alignment> AVec<T, A> {
 
 	#[inline(always)]
 	#[doc(hidden)]
-	/// this is unsafe do not call this in user code
-	pub fn __copy_from_ptr(align: usize, src: *const T, len: usize) -> Self {
+	/// Copies `len` elements from `src` into a new aligned vector.
+	///
+	/// # Safety
+	///
+	/// If `len` is nonzero, `src` must be non-null, properly aligned for `T`,
+	/// and valid for reads of `len` initialized `T` values. The caller must also
+	/// ensure bitwise-copying those values does not duplicate ownership; for example,
+	/// `T` has copy semantics or the source elements are stored in `ManuallyDrop` and
+	/// will not be read or dropped after this copy.
+	pub unsafe fn __copy_from_ptr(align: usize, src: *const T, len: usize) -> Self {
 		let mut v = Self::with_capacity(align, len);
-		let dst = v.as_mut_ptr();
-		unsafe { core::ptr::copy_nonoverlapping(src, dst, len) };
+		if len != 0 {
+			let dst = v.as_mut_ptr();
+			unsafe { core::ptr::copy_nonoverlapping(src, dst, len) };
+		}
 		v.len = len;
 		v
 	}
@@ -1024,7 +1034,11 @@ macro_rules! avec {
             let __data = &::core::mem::ManuallyDrop::new([$($elem,)*]);
             let __len = __data.len();
             let __ptr = __data.as_ptr();
-            let mut __aligned_vec = $crate::AVec::<_, $crate::ConstAlign::<$align>>::__copy_from_ptr(0, __ptr, __len);
+            // SAFETY: `__data` is a live `ManuallyDrop` array, so `__ptr` points
+            // to `__len` initialized elements until the copy completes.
+            let mut __aligned_vec = unsafe {
+                $crate::AVec::<_, $crate::ConstAlign::<$align>>::__copy_from_ptr(0, __ptr, __len)
+            };
             __aligned_vec
         }
     };
@@ -1036,7 +1050,11 @@ macro_rules! avec {
             let __data = &::core::mem::ManuallyDrop::new([$($elem,)*]);
             let __len = __data.len();
             let __ptr = __data.as_ptr();
-            let mut __aligned_vec = $crate::AVec::<_>::__copy_from_ptr(0, __ptr, __len);
+            // SAFETY: `__data` is a live `ManuallyDrop` array, so `__ptr` points
+            // to `__len` initialized elements until the copy completes.
+            let mut __aligned_vec = unsafe {
+                $crate::AVec::<_>::__copy_from_ptr(0, __ptr, __len)
+            };
             __aligned_vec
         }
     };
@@ -1051,15 +1069,20 @@ macro_rules! avec_rt {
     ([$align: expr]| $elem: expr; $count: expr) => {
         $crate::AVec::<_, $crate::RuntimeAlign>::__from_elem($align, $elem, $count)
     };
-    ([$align: expr]| $($elem: expr),*) => {
-        {
-            let __data = &::core::mem::ManuallyDrop::new([$($elem,)*]);
-            let __len = __data.len();
-            let __ptr = __data.as_ptr();
-            let mut __aligned_vec = $crate::AVec::<_>::__copy_from_ptr($align, __ptr, __len);
-            __aligned_vec
-        }
-    };
+	([$align: expr]| $($elem: expr),*) => {
+		{
+			let __data = &::core::mem::ManuallyDrop::new([$($elem,)*]);
+			let __len = __data.len();
+			let __ptr = __data.as_ptr();
+			let __align = $align;
+			// SAFETY: `__data` is a live `ManuallyDrop` array, so `__ptr` points
+			// to `__len` initialized elements until the copy completes.
+			let mut __aligned_vec = unsafe {
+				$crate::AVec::<_>::__copy_from_ptr(__align, __ptr, __len)
+			};
+			__aligned_vec
+		}
+	};
 }
 
 #[cfg(test)]
@@ -1147,6 +1170,32 @@ mod tests {
 		v.insert(2, ());
 		v.insert(7, ());
 		assert_eq!(&*v, &[(), (), (), (), (), (), (), ()]);
+	}
+
+	#[test]
+	#[should_panic(expected = "insertion index")]
+	fn insert_out_of_bounds_panics_before_pointer_arithmetic() {
+		let mut v = AVec::<u8>::new(1);
+		v.push(1);
+
+		let bad_index = v.capacity().saturating_mul(4).saturating_add(1);
+		v.insert(bad_index, 2);
+	}
+
+	#[cfg(feature = "std")]
+	#[test]
+	fn insert_out_of_bounds_does_not_reserve() {
+		let mut v = AVec::<u8>::with_capacity(1, 1);
+		v.push(1);
+		let capacity = v.capacity();
+
+		let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+			v.insert(usize::MAX / 2, 2);
+		}));
+
+		assert!(result.is_err());
+		assert_eq!(v.capacity(), capacity);
+		assert_eq!(&*v, &[1]);
 	}
 
 	#[test]
